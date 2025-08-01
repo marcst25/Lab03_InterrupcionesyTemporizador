@@ -1,0 +1,140 @@
+// Universidad del Valle de Guatemala  
+// BE3029 - Electrónica Digital 2  
+// Marcela Castañeda - 23717  
+// Laboratorio 03 - Interrupciones y Temporizador
+// MCU: ESP32 dev kit 1.1 
+
+//-------------------------------- LIBRERÍAS -------------------------------------// 
+#include <Arduino.h> 
+#include <stdint.h> 
+
+// ------------------- DEFINICIONES ------------------- // 
+
+//Definición de las LEDs 
+#define LED_1 22 
+#define LED_2 3 
+#define LED_3 19 
+#define LED_4 5 
+
+
+//Definición de los botones 
+#define BTN_INC 27 //Boton de incremento del contador 
+#define BTN_DEC 25 //Boton de decremento del contador 
+
+
+#define TiempoAntirrebote 500 //Se asigna el tiempo para el antirrebote del botón  
+
+// ------------------- VARIABLES GLOBALES ------------------- // 
+
+//Variable para el contador
+volatile uint32_t contador;  
+
+//Variables para saber si se presionó el botón  
+volatile bool BTN_INCREPressed;  
+volatile bool BTN_DECREPressed; 
+
+// Variables para saber el tiempo de cada botón  
+volatile uint32_t lastISRBTN_INCRE = 0; //Se usa last ISR porque se usa milis(), una variable de 32 bits 
+volatile uint32_t lastISRBTN_DECRE = 0;  
+
+// ------------------- PROTOTIPO DE FUNCIONES ------------------- // 
+
+// Prototipo para inicializar los botones de aumento y decremento 
+
+void initBTN_INCRE(void);  
+void initBTN_DECRE(void);  
+
+void IRAM_ATTR BTN_INC_ISR(void);  
+void IRAM_ATTR BTN_DEC_ISR(void); 
+
+// Prototipo para la función del contador binario
+void contadorBinario(void);
+
+//ISRs rutinas de interrupción  
+
+void IRAM_ATTR BTN_INC_ISR(void){ 
+
+  uint32_t tiempoActual1 = millis();  
+  if (tiempoActual1 - lastISRBTN_INCRE > TiempoAntirrebote) {  
+  BTN_INCREPressed = true; //El botón fue presionado 
+  contador++; 
+  lastISRBTN_INCRE = tiempoActual1; } 
+} 
+
+
+void IRAM_ATTR BTN_DEC_ISR(void){ 
+  uint32_t tiempoActual2 = millis();  
+  if (tiempoActual2 - lastISRBTN_DECRE > TiempoAntirrebote) {  
+  BTN_DECREPressed = true; //El botón fue presionado, (tiene la misma lógica que el botón de incremento todavía) 
+  contador--;  
+  lastISRBTN_DECRE = tiempoActual2; } 
+
+} 
+ 
+
+// -------------------------------------- SETUP ------------------- // 
+
+void setup() { 
+
+  Serial.begin(115200); ///Iniciar la comunicación serial 
+
+  //Iniciaizar los botones 
+  initBTN_INCRE();  
+  initBTN_DECRE();  
+
+  // Empezar con el contador en 0 
+  contador = 0;  
+
+  //Se asignan las LEDs como salidas 
+
+  pinMode(LED_1, OUTPUT); 
+  pinMode(LED_2, OUTPUT); 
+  pinMode(LED_3, OUTPUT); 
+  pinMode(LED_4, OUTPUT); 
+
+  //Se inicia con todas las LEDs apagadas  
+
+  digitalWrite(LED_1,LOW); 
+  digitalWrite(LED_2,LOW); 
+  digitalWrite(LED_3,LOW); 
+  digitalWrite(LED_4,LOW); 
+
+} 
+ 
+
+// ------------------- LOOP PRINCIPAL ------------------- // 
+
+void loop() { 
+
+  if (BTN_INCREPressed) BTN_INCREPressed = false;
+  if (BTN_DECREPressed) BTN_DECREPressed = false;
+
+  contadorBinario(); //Llamar a la función del contador binario
+
+  delay(10); 
+
+} 
+
+
+// --------------------- DEFINICIÓN DE LAS FUNCIONES --------------------- 
+
+void initBTN_INCRE(void) { 
+  pinMode(BTN_INC, INPUT_PULLUP); //Configurar entrada como pull-up 
+  attachInterrupt(BTN_INC, &BTN_INC_ISR, FALLING);  //Asignar ISR, BTN Incrementar,Falling 
+} 
+
+void initBTN_DECRE(void) { 
+  pinMode(BTN_DEC, INPUT_PULLDOWN); //Configurar entrada como pull-up
+  attachInterrupt(BTN_DEC, &BTN_DEC_ISR, RISING); //Asignar ISR, BTN Decrementar, Falling
+} 
+
+// Función para el contador binario
+void contadorBinario(void) {
+  if (contador > 15) contador = 0;
+  if (contador < 0) contador = 15;
+
+  digitalWrite(LED_1, (contador & 0x01) ? HIGH : LOW);
+  digitalWrite(LED_2, (contador & 0x02) ? HIGH : LOW);
+  digitalWrite(LED_3, (contador & 0x04) ? HIGH : LOW);
+  digitalWrite(LED_4, (contador & 0x08) ? HIGH : LOW);
+}
