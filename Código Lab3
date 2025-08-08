@@ -1,80 +1,195 @@
-// Universidad del Valle de Guatemala  
-// BE3029 - Electrónica Digital 2  
-// Marcela Castañeda - 23717  
+// Universidad del Valle de Guatemala
+// BE3029 - Electrónica Digital 2
+// Marcela Castañeda - 23717
 // Laboratorio 03 - Interrupciones y Temporizador
-// MCU: ESP32 dev kit 1.1 
+// MCU: ESP32 dev kit 1.1
 
-//-------------------------------- LIBRERÍAS -------------------------------------// 
-#include <Arduino.h> 
-#include <stdint.h> 
+//-------------------------------- LIBRERÍAS -------------------------------------//
+#include <Arduino.h>
+#include <stdint.h>
 
-// ------------------- DEFINICIONES ------------------- // 
+// ------------------- DEFINICIONES ------------------- //
 
-// Definición de las LEDs 
-#define LED_1 22 
-#define LED_2 3 
-#define LED_3 19 
-#define LED_4 5 
- 
-// ------------------- VARIABLES GLOBALES ------------------- // 
+//Definición de las LEDs (1-4 para contador manual, 5-8 para contador automático)
+#define LED_1 22
+#define LED_2 3
+#define LED_3 19
+#define LED_4 5
+#define LED_5 18
+#define LED_6 17
+#define LED_7 16
+#define LED_8 4
 
-// Variable para el contador
-volatile int32_t contador;  
+// LED de alarma
+#define LED_ALARMA 21
+
+//Definición de los botones
+#define BTN_INC 27  //Botón de incremento del contador manual
+#define BTN_DEC 25  //Botón de decremento del contador manual
+
+//Definición del sensor capacitivo de reset
+#define RESET 15 // Pin táctil para reset del contador automático
+
+#define TiempoAntirrebote 500 //Se asigna el tiempo para el antirrebote del botón
+
+// ------------------- VARIABLES GLOBALES ------------------- //
+
+//Variable para el contador manual (botones)
+volatile int32_t contadorBotones;
+
+//Variable para el contador automático (timer)
+volatile int32_t contadorTimer;
+
+//Variables para saber si se presionó el botón
+volatile bool BTN_INCREPressed;
+volatile bool BTN_DECREPressed;
+
+// Variables para saber el tiempo de cada botón
+volatile uint32_t lastISRBTN_INCRE = 0;
+volatile uint32_t lastISRBTN_DECRE = 0;
 
 // Instanciar el temporizador 0
-hw_timer_t* Timer0_Cfg = NULL;
+hw_timer_t *Timer0_Cfg = NULL;
 
-// --------------------- PROTOTIPOS DE FUNCIÓN ---------------------- //
-void initTimer0(void); 
-void contadorBinario(void);
+// Variable para estado de la alarma
+volatile bool alarmaEncendida = false;
 
-// -------------------- ISRs rutinas de interrupción ------------------- //
+// ------------------- PROTOTIPO DE FUNCIONES ------------------- //
+void initBTN_INCRE(void);
+void initBTN_DECRE(void);
+void contadorBinarioBotones(void);
+void contadorBinarioTimer(void);
+void initTimer0(void);
+void compararContadores(void);
+
+// ------------------- ISRs ------------------- //
+void IRAM_ATTR BTN_INC_ISR(void) {
+  uint32_t tiempoActual1 = millis();
+  if (tiempoActual1 - lastISRBTN_INCRE > TiempoAntirrebote) {
+    BTN_INCREPressed = true; //El botón fue presionado
+    contadorBotones++;
+    if (contadorBotones > 15) contadorBotones = 0;
+    if (contadorBotones < 0) contadorBotones = 15;
+    lastISRBTN_INCRE = tiempoActual1;
+  }
+}
+
+void IRAM_ATTR BTN_DEC_ISR(void) {
+  uint32_t tiempoActual2 = millis();
+  if (tiempoActual2 - lastISRBTN_DECRE > TiempoAntirrebote) {
+    BTN_DECREPressed = true; //El botón fue presionado
+    contadorBotones--;
+    if (contadorBotones > 15) contadorBotones = 0;
+    if (contadorBotones < 0) contadorBotones = 15;
+    lastISRBTN_DECRE = tiempoActual2;
+  }
+}
+
 void IRAM_ATTR TMR0_ISR(void) {
-  contador++;                    // ¡Incrementar el contador!
-  if (contador > 15) contador = 0; // Reiniciar si pasa de 15
-    contadorBinario(); // Llamar a la función del contador binario
+  contadorTimer++; // Incrementar el contador automático
+  if (contadorTimer > 15) contadorTimer = 0; // Reinicio circular
+  contadorBinarioTimer(); // Mostrar el valor en LEDs 5-8
+  compararContadores();  // Verificar si los contadores son iguales
 }
 
-// -------------------------------------- SETUP ------------------- // 
-void setup() { 
-  Serial.begin(115200); 
+// ------------------- SETUP ------------------- //
+void setup() {
+  Serial.begin(115200); ///Iniciar la comunicación serial
 
-  contador = 0;  
+  //Iniciaizar los botones
+  initBTN_INCRE();
+  initBTN_DECRE();
 
-  // Configurar pines como salidas 
-  pinMode(LED_1, OUTPUT); 
-  pinMode(LED_2, OUTPUT); 
-  pinMode(LED_3, OUTPUT); 
-  pinMode(LED_4, OUTPUT); 
+  // Asignar LEDs como salidas
+  pinMode(LED_1, OUTPUT);
+  pinMode(LED_2, OUTPUT);
+  pinMode(LED_3, OUTPUT);
+  pinMode(LED_4, OUTPUT);
+  pinMode(LED_5, OUTPUT);
+  pinMode(LED_6, OUTPUT);
+  pinMode(LED_7, OUTPUT);
+  pinMode(LED_8, OUTPUT);
+  pinMode(LED_ALARMA, OUTPUT);
 
-  // Apagar LEDs al inicio
-  digitalWrite(LED_1, LOW); 
-  digitalWrite(LED_2, LOW); 
-  digitalWrite(LED_3, LOW); 
-  digitalWrite(LED_4, LOW); 
+  // Iniciar con LEDs apagados
+  digitalWrite(LED_1, LOW);
+  digitalWrite(LED_2, LOW);
+  digitalWrite(LED_3, LOW);
+  digitalWrite(LED_4, LOW);
+  digitalWrite(LED_5, LOW);
+  digitalWrite(LED_6, LOW);
+  digitalWrite(LED_7, LOW);
+  digitalWrite(LED_8, LOW);
+  digitalWrite(LED_ALARMA, LOW);
 
-  initTimer0(); // Inicializar el temporizador 0
-} 
+  // Empezar con los contadores en 0
+  contadorBotones = 0;
+  contadorTimer = 0;
 
-// ------------------- LOOP ------------------- //
+  // Inicializar el temporizador
+  initTimer0();
+}
+
+// ------------------- LOOP PRINCIPAL ------------------- //
 void loop() {
-  // En el loop no se coloca nada porque todo lo realiza el temporizador 
+  if (BTN_INCREPressed) {
+    BTN_INCREPressed = false;
+    contadorBinarioBotones();
+  }
+  if (BTN_DECREPressed) {
+    BTN_DECREPressed = false;
+    contadorBinarioBotones();
+  }
+
+  // Lectura del sensor capacitivo para reset
+  if (touchRead(RESET) < 30) { // Umbral táctil
+    contadorTimer = 0;  // Reinicia el contador automático
+    contadorBinarioTimer();
+    delay(300); // Evita múltiples resets por un solo toque
+  }
+
+  delay(10);
 }
 
-// ------------------- FUNCIONES ------------------- //
+// ------------------- DEFINICIÓN DE LAS FUNCIONES ------------------- //
+void initBTN_INCRE(void) {
+  pinMode(BTN_INC, INPUT_PULLUP); //Configurar entrada como pull-up
+  attachInterrupt(BTN_INC, &BTN_INC_ISR, FALLING); //Asignar ISR
+}
 
-// Inicializar el temporizador 0 
+void initBTN_DECRE(void) {
+  pinMode(BTN_DEC, INPUT_PULLDOWN); //Configurar entrada como pull-down
+  attachInterrupt(BTN_DEC, &BTN_DEC_ISR, RISING); //Asignar ISR
+}
+
 void initTimer0(void) {
-  Timer0_Cfg = timerBegin(0, 80, true); // Timer 0, con prescaler de 80              
-  timerAttachInterrupt(Timer0_Cfg, &TMR0_ISR, true); // Llamar a la ISR  
-  timerAlarmWrite(Timer0_Cfg, 250000, true);              
-  timerAlarmEnable(Timer0_Cfg);                           
+  Timer0_Cfg = timerBegin(0, 80, true);  // Timer 0, prescaler de 80
+  timerAttachInterrupt(Timer0_Cfg, &TMR0_ISR, true); // Llamar a la ISR
+  timerAlarmWrite(Timer0_Cfg, 250000, true); // 250 ms
+  timerAlarmEnable(Timer0_Cfg); // Habilitar
 }
 
-// Función para el contador binario
-void contadorBinario(void) {
-  digitalWrite(LED_1, (contador & 0x01) ? HIGH : LOW); 
-  digitalWrite(LED_2, (contador & 0x02) ? HIGH : LOW); 
-  digitalWrite(LED_3, (contador & 0x04) ? HIGH : LOW); 
-  digitalWrite(LED_4, (contador & 0x08) ? HIGH : LOW); 
+// Función para el contador manual
+void contadorBinarioBotones(void) {
+  digitalWrite(LED_1, (contadorBotones & 0x01) ? HIGH : LOW);
+  digitalWrite(LED_2, (contadorBotones & 0x02) ? HIGH : LOW);
+  digitalWrite(LED_3, (contadorBotones & 0x04) ? HIGH : LOW);
+  digitalWrite(LED_4, (contadorBotones & 0x08) ? HIGH : LOW);
+}
+
+// Función para el contador automático
+void contadorBinarioTimer(void) {
+  digitalWrite(LED_5, (contadorTimer & 0x01) ? HIGH : LOW);
+  digitalWrite(LED_6, (contadorTimer & 0x02) ? HIGH : LOW);
+  digitalWrite(LED_7, (contadorTimer & 0x04) ? HIGH : LOW);
+  digitalWrite(LED_8, (contadorTimer & 0x08) ? HIGH : LOW);
+}
+
+// Función que compara los contadores y activa la alarma
+void compararContadores(void) {
+  if (contadorBotones == contadorTimer) {
+    alarmaEncendida = !alarmaEncendida; // Cambia el estado de la alarma
+    digitalWrite(LED_ALARMA, alarmaEncendida ? HIGH : LOW);
+    contadorTimer = 0; // Reinicia el contador del timer
+  }
 }
